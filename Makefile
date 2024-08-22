@@ -1,9 +1,3 @@
-UID=$(shell id -u)
-GID=$(shell id -g)
-DOCKER_PHP_SERVICE=php
-
-SHELL=/bin/bash
-
 .DEFAULT_GOAL := start
 
 start: build composer-install ## Initialize project
@@ -12,34 +6,50 @@ start: build composer-install ## Initialize project
 help: ## Displays this list of targets with descriptions
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[32m%-30s\033[0m %s\n", $$1, $$2}'
 
-build:
-		docker build -t php-template .
+build: ## Build docker image
+	docker build -t php-template .
 
-erase: ## Remove the Docker containers of the project.
-		docker rmi php-template
+require: ## Install package. Arguments: package
+	make run-composer-command-on-container command="require $(package)"
+
+require-dev: ## Install dev package. Arguments: package
+	make run-composer-command-on-container command="require --dev $(package)"
+
+erase: ## Remove the docker image of the project.
+	docker rmi php-template
 
 composer-install: ## Install composer dependencies
-		docker run --rm -v .:/app php-template composer install
+	make run-composer-command-on-container command="install"
 
 composer-update: ## Update composer dependencies
-		docker run --rm -v .:/app php-template composer update
+	make run-composer-command-on-container command="update"
 
 phpunit: ## Run PHPUnit
-		docker run --rm -v .:/app php-template vendor/bin/phpunit tests
+	make run-command-on-container command="vendor/bin/phpunit tests"
 
 phpstan: ## Run PHPStan
-		docker run --rm -v ${PWD}:/app ghcr.io/phpstan/phpstan analyse ./src -l 8
+	make run-command-on-container command="vendor/bin/phpstan analyse"
 
-fix-cs: ## Fix code standards
-		docker run --rm -v ${PWD}:/data cytopia/php-cs-fixer fix --verbose --show-progress=dots --rules=@Symfony,-@PSR2 -- src
-		docker run --rm -v ${PWD}:/data cytopia/php-cs-fixer fix --verbose --show-progress=dots --rules=@Symfony,-@PSR2 -- tests
+fix-cs: ## Fix code style
+	docker run --rm -v ${PWD}:/data cytopia/php-cs-fixer fix --verbose --show-progress=dots --rules=@Symfony,-@PSR2 -- src
+	docker run --rm -v ${PWD}:/data cytopia/php-cs-fixer fix --verbose --show-progress=dots --rules=@Symfony,-@PSR2 -- tests
 
-validate-cs: ## Validate code standards
-		docker run --rm -v ${PWD}:/data cytopia/php-cs-fixer fix --dry-run --verbose --show-progress=dots --rules=@Symfony,-@PSR2 -- src
-		docker run --rm -v ${PWD}:/data cytopia/php-cs-fixer fix --dry-run --verbose --show-progress=dots --rules=@Symfony,-@PSR2 -- tests
+validate-cs: ## Validate code style
+	docker run --rm -v ${PWD}:/data cytopia/php-cs-fixer fix --dry-run --verbose --show-progress=dots --rules=@Symfony,-@PSR2 -- src
+	docker run --rm -v ${PWD}:/data cytopia/php-cs-fixer fix --dry-run --verbose --show-progress=dots --rules=@Symfony,-@PSR2 -- tests
+
+infection: ## Run Infection
+	make run-command-on-container command="vendor/bin/infection"
 
 .PHONY: tests
-tests: ## Run cs validation, PHPStan and PHPUnit
+tests: ## Run cs validation, PHPStan, PHPUnit and Infection
 	make validate-cs
 	make phpstan
 	make phpunit
+	make infection
+
+run-command-on-container: ## Execute command in the container. Arguments: command
+	docker run --rm -v .:/app php-template $(command)
+
+run-composer-command-on-container: ## Execute composer command in the container. Arguments: command
+	make run-command-on-container command="composer $(command)"
